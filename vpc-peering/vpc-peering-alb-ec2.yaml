@@ -30,19 +30,9 @@ Parameters:
     Type: String
     Default: 10.192.11.0/24
 
-  PrivateSubnetACIDR:
-    Description: Please enter the IP range (CIDR notation) for the private subnet in the first Availability Zone
-    Type: String
-    Default: 10.192.20.0/24
-
-  PrivateSubnetBCIDR:
-    Description: Please enter the IP range (CIDR notation) for the private subnet in the second Availability Zone
-    Type: String
-    Default: 10.192.21.0/24
-
   CertificateArn:
     Type: String
-    Default: arn:aws:acm:ap-southeast-1:283094985920:certificate/d600277f-7180-47fa-becc-45be6c553753
+    Description: Arn of the certifications from AWS certificate manager
 
   PeerVPC:
     Type: AWS::EC2::VPC::Id
