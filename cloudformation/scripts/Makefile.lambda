@@ -1,0 +1,11 @@
+clean:
+	rm -rf ./bin
+
+build: clean
+	GOOS=linux GOARCH=amd64 go build -o bin/yourFunction ./yourFunction
+
+test:
+	go test ./...
+
+run-local: build
+	sam local start-api -p 8080

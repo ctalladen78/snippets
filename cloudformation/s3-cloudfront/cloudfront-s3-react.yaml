@@ -1,0 +1,102 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Creates an S3 bucket configured for hosting a static website, and a Route
+  53 DNS record pointing to the bucket
+
+Parameters:
+  Environment:
+    Type: String
+    AllowedValues:
+      - development
+      - production
+  DomainName:
+    Type: String
+    Default: githubevaluator.com
+  AcmCertificateArn:
+    Type: String
+    Description: the Amazon Resource Name (ARN) of an AWS Certificate Manager (ACM) certificate.
+    AllowedPattern: "arn:aws:acm:.*"
+    # Certificates must be issued in the us-east-1 Virginia region because of Cloudfront
+    Default: ""
+    ConstraintDescription: invalid certificates arn
+
+Conditions:
+  isProduction: !Equals [!Ref Environment, production]
+
+Mappings:
+  AliasMap:
+    dev:
+      Alias: "dev.yourdomain.com"
+      Aliaswww: "www.dev.yourdomain.com"
+    production:
+      Alias: "yourdomain.com"
+      Aliaswww: "www.yourdomain.com"
+
+Resources:
+  WebsiteBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    Properties:
+      BucketName: !If [isProduction, !Ref DomainName, !Join [".", [!Ref Environment, !Ref DomainName]]]
+      AccessControl: PublicRead
+      WebsiteConfiguration:
+        IndexDocument: index.html
+      CorsConfiguration:
+        CorsRules:
+          - AllowedHeaders:
+              - "*"
+            AllowedMethods:
+              - GET
+              - HEAD
+            AllowedOrigins:
+              - "*"
+            MaxAge: "3000"
+
+  WebsiteBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref WebsiteBucket
+      PolicyDocument:
+        Statement:
+          - Sid: PublicReadForGetBucketObjects
+            Effect: Allow
+            Principal: "*"
+            Action: s3:GetObject
+            Resource: !Join ["", ["arn:aws:s3:::", !Ref "WebsiteBucket", /*]]
+
+  WebsiteCDN:
+    Type: AWS::CloudFront::Distribution
+    Condition: isProduction
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        IPV6Enabled: true
+        HttpVersion: http2
+        Comment: !Join ["--", [!Ref "AWS::StackName", " Cloud Front"]]
+        Aliases:
+          - !FindInMap [AliasMap, !Ref Environment, Alias]
+          - !FindInMap [AliasMap, !Ref Environment, Aliaswww]
+        ViewerCertificate:
+          AcmCertificateArn: !Ref AcmCertificateArn
+          SslSupportMethod: sni-only
+          MinimumProtocolVersion: TLSv1.1_2016
+        Origins:
+          - Id: S3Origin
+            DomainName: !GetAtt WebsiteBucket.DomainName
+            S3OriginConfig: {}
+        DefaultRootObject: index.html
+        DefaultCacheBehavior:
+          AllowedMethods:
+            - GET
+            - HEAD
+          Compress: true
+          TargetOriginId: S3Origin
+          ForwardedValues:
+            Headers:
+              - Access-Control-Request-Headers
+              - Access-Control-Request-Method
+              - Origin
+              - Authorization
+            QueryString: true
+            Cookies:
+              Forward: none
+          ViewerProtocolPolicy: redirect-to-https

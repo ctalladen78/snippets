@@ -1,6 +1,6 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
-Description: "Swipe Mango Network infrastructures"
+Description: "Vpc and networking infrastructures boilerplate"
 
 Parameters:
   Environment:
@@ -12,7 +12,7 @@ Parameters:
     ConstraintDescription: invalid environment, only [production, staging, development] are allowed
   Appname:
     Type: String
-    Default: swipemango
+    Default: myapp
 
 Resources:
   VPC:
