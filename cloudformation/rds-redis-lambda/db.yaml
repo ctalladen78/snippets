@@ -1,0 +1,151 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "RDS boilerplate"
+
+Parameters:
+  Environment:
+    Type: String
+    AllowedValues:
+      - production
+      - stag
+      - dev
+    ConstraintDescription: invalid environment, only [production, staging, development] are allowed
+  Appname:
+    Type: String
+    Default: myapp
+
+Mappings:
+  DBInstances:
+    production:
+      dbInstance: db.t3.small
+      storageSize: "30"
+      backupRetentionPeriod: 7
+    dev:
+      dbInstance: db.t2.micro
+      storageSize: "5"
+      backupRetentionPeriod: 0
+
+Conditions:
+  isProduction: !Equals [!Ref Environment, production]
+
+Resources:
+  DBInstance:
+    Type: AWS::RDS::DBInstance
+    DeletionPolicy: Retain
+    DependsOn: Secret
+    Properties:
+      DBName: !Sub ${Appname}_${Environment}
+      Engine: postgres
+      BackupRetentionPeriod: !FindInMap [DBInstances, !Ref Environment, backupRetentionPeriod]
+      PreferredBackupWindow: "18:00-19:00"
+      PreferredMaintenanceWindow: "mon:20:00-mon:21:00"
+      MasterUsername: !Join ['', ['{{resolve:secretsmanager:', !Ref Secret, ':SecretString:username}}' ]]
+      MasterUserPassword: !Join ['', ['{{resolve:secretsmanager:', !Ref Secret, ':SecretString:password}}' ]]
+      DBInstanceClass: !FindInMap [DBInstances, !Ref Environment, dbInstance]
+      VPCSecurityGroups:
+        - Fn::ImportValue: !Sub ${Appname}-${Environment}-db-scgroupId
+      AllocatedStorage: !FindInMap [DBInstances, !Ref Environment, storageSize]
+      StorageType: gp2
+      DBSubnetGroupName: !Ref DBSubnetGroup
+
+  DBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: db subnets
+      SubnetIds:
+        - Fn::ImportValue: !Sub ${Appname}-${Environment}-subnetAId
+        - Fn::ImportValue: !Sub ${Appname}-${Environment}-subnetBId
+
+  Secret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Description: 'Database secret'
+      GenerateSecretString:
+        SecretStringTemplate: '{"username": "swmadmin"}'
+        GenerateStringKey: 'password'
+        PasswordLength: 30
+        ExcludeCharacters: '"@/\'
+
+  SecretRDSInstanceAttachment:
+    Type: AWS::SecretsManager::SecretTargetAttachment
+    Properties:
+      SecretId: !Ref Secret
+      TargetId: !Ref DBInstance
+      TargetType: AWS::RDS::DBInstance
+
+  #This resource policy denies the DeleteSecret action to all principals within the current account
+  SecretResourcePolicy:
+    Type: AWS::SecretsManager::ResourcePolicy
+    Properties:
+      SecretId: !Ref Secret
+      ResourcePolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Deny
+            Principal:
+              AWS: !Sub 'arn:aws:iam::${AWS::AccountId}:root'
+            Action: secretsmanager:DeleteSecret
+            Resource: "*"
+
+  #ALARMS ===================================================
+  DBAlarmTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      DisplayName: Stack Alarm Topic
+
+  CPUAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Database CPU utilization is over 80%.
+      Namespace: AWS/RDS
+      MetricName: CPUUtilization
+      Unit: Percent
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 80
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      Dimensions:
+        - Name: DBInstanceIdentifier
+          Value: !Ref DBInstance
+      AlarmActions:
+        - Ref: DBAlarmTopic
+      InsufficientDataActions:
+        - Ref: DBAlarmTopic
+
+  FreeStorageAlarm:
+    Condition: isProduction
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: 'RDS Free Storage Alarm'
+      ComparisonOperator: LessThanThreshold
+      DatapointsToAlarm: 1
+      Dimensions:
+        - Name: DBInstanceIdentifier
+          Value: !Ref DBInstance
+      EvaluationPeriods: 1
+      MetricName: FreeStorageSpace
+      Namespace: AWS/RDS
+      Period: 60
+      Statistic: Average
+      Threshold: 2147483648
+      TreatMissingData: ignore
+      Unit: Bytes
+      AlarmActions:
+        - Ref: DBAlarmTopic
+      InsufficientDataActions:
+        - Ref: DBAlarmTopic
+
+#OUTPUTS ==================================================
+Outputs:
+  dbEndpoint:
+    Value: !GetAtt DBInstance.Endpoint.Address
+    Export:
+      Name: !Sub ${Appname}-${Environment}-db-host
+  dbPort:
+    Value: !GetAtt DBInstance.Endpoint.Port
+    Export:
+      Name: !Sub ${Appname}-${Environment}-db-port
+  dbSecretArn:
+    Value: !Ref Secret
+    Export:
+      Name: !Sub ${Appname}-${Environment}-dbsecret-arn

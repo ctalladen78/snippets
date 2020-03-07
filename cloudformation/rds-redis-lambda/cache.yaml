@@ -1,0 +1,121 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "Redis Elastic cache boilerplate"
+
+Parameters:
+  Environment:
+    Type: String
+    AllowedValues:
+      - production
+      - stag
+      - dev
+    ConstraintDescription: invalid environment, only [production, staging, development] are allowed
+  Appname:
+    Type: String
+    Default: yourappname
+
+Mappings:
+  # Chose your infrastructures size
+  CacheInstances:
+    production:
+      cacheInstance: cache.t3.small
+      backupRetentionPeriod: 7
+    dev:
+      cacheInstance: cache.t2.micro
+      backupRetentionPeriod: 0
+
+Conditions:
+  isProduction: !Equals [!Ref Environment, production]
+
+Resources:
+
+  CacheReplicationGroup:
+    DeletionPolicy: Snapshot
+    UpdateReplacePolicy: Snapshot
+    DependsOn: CacheSubnetGroup
+    Type: AWS::ElastiCache::ReplicationGroup
+    Properties:
+      Engine: redis
+      Port: 6379
+      ReplicationGroupDescription: !Ref 'AWS::StackName'
+      AutomaticFailoverEnabled: !If [isProduction, true, false]
+      CacheNodeType: !FindInMap [CacheInstances, !Ref Environment, cacheInstance]
+      CacheSubnetGroupName: !Ref CacheSubnetGroup
+      NumNodeGroups: 1
+      ReplicasPerNodeGroup: !If [isProduction, 1, 0]
+      SecurityGroupIds:
+        - Fn::ImportValue: !Sub ${Appname}-${Environment}-cache-scgroupId
+      SnapshotRetentionLimit: !FindInMap [CacheInstances, !Ref Environment, backupRetentionPeriod]
+      PreferredMaintenanceWindow: "tue:20:00-tue:21:00"
+      SnapshotWindow: "21:00-22:00"
+
+  CacheSubnetGroup:
+    Type: AWS::ElastiCache::SubnetGroup
+    Properties:
+      Description: cache subnets group
+      SubnetIds:
+        - Fn::ImportValue: !Sub ${Appname}-${Environment}-subnetAId
+        - Fn::ImportValue: !Sub ${Appname}-${Environment}-subnetBId
+
+  #ALARMS ===================================================
+  CacheAlarmTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      DisplayName: Cache Alarm Topic
+
+  CPUAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: 'Database CPU utilization is over 80%.'
+      Namespace: AWS/ElastiCache
+      MetricName: CPUUtilization
+      Unit: Percent
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 80
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      Dimensions:
+        - Name: CacheClusterId
+          Value: !Ref CacheReplicationGroup
+      AlarmActions:
+        - Ref: CacheAlarmTopic
+      InsufficientDataActions:
+        - Ref: CacheAlarmTopic
+
+  EvictionsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: 'Average evictions over last 10 minutes higher than 1000, may enough memory for all keys'
+      Namespace: AWS/ElastiCache
+      MetricName: Evictions
+      Statistic: Average
+      Period: 600
+      EvaluationPeriods: 1
+      ComparisonOperator: GreaterThanThreshold
+      Threshold: 1000
+      Dimensions:
+        - Name: CacheClusterId
+          Value: !Ref CacheReplicationGroup
+      AlarmActions:
+        - Ref: CacheAlarmTopic
+      InsufficientDataActions:
+        - Ref: CacheAlarmTopic
+
+#OUTPUTS ==================================================
+Outputs:
+  cacheMasterEndpoint:
+    Value: !GetAtt CacheReplicationGroup.PrimaryEndPoint.Address
+    Export:
+      Name: !Sub ${Appname}-${Environment}-cachemaster-dns
+  cacheMasterPort:
+    Value: !GetAtt CacheReplicationGroup.PrimaryEndPoint.Port
+    Export:
+      Name: !Sub ${Appname}-${Environment}-cachemaster-port
+  cacheSlaveEndpoints:
+    Value: !GetAtt CacheReplicationGroup.ReadEndPoint.Addresses
+    Export:
+      Name: !Sub ${Appname}-${Environment}-cacheslave-dnss
+  cacheSlavePorts:
+    Value: !GetAtt CacheReplicationGroup.ReadEndPoint.Ports
+    Export:
+      Name: !Sub ${Appname}-${Environment}-cacheslave-ports

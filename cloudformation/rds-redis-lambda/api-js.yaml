@@ -1,0 +1,170 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: "Boilerplate template"
+
+Parameters:
+  Environment:
+    Type: String
+    AllowedValues:
+      # this is due nodejs not recognising prod as valid NODE_ENV
+      - production
+      - stag
+      - dev
+    ConstraintDescription: invalid environment, only [production, staging, development] are allowed
+  ProductionAlias:
+    Type: String
+    Default: live
+  Appname:
+    Type: String
+    Default: yourappname
+
+Mappings:
+  General:
+    production:
+      originUrl: "*"
+    dev:
+      originUrl: "*"
+
+Conditions:
+  isProduction: !Equals [!Ref Environment, production]
+
+Globals:
+  Function:
+    Runtime: nodejs10.x
+    Timeout: 30
+    MemorySize: 128
+    AutoPublishAlias: !Ref ProductionAlias
+    DeploymentPreference:
+      Type: !If [isProduction, Linear10PercentEvery1Minute, AllAtOnce]
+      Alarms:
+        - !Ref ErrorMetricGreaterThanZeroAlarm
+    Layers:
+      - !Ref LibLayer
+    Environment:
+      Variables:
+        ORIGIN_URL: !FindInMap [General, !Ref Environment, originUrl]
+        NODE_ENV: !Ref Environment
+        DB_NAME: !Sub ${Appname}_${Environment}
+        DB_PORT:
+          Fn::ImportValue: !Sub ${Appname}-${Environment}-db-port
+        DB_HOST:
+          Fn::ImportValue: !Sub ${Appname}-${Environment}-db-host
+        DB_SECRET_ARN:
+          Fn::ImportValue: !Sub ${Appname}-${Environment}-dbsecret-arn
+        CACHE_MASTER_DNS:
+          Fn::ImportValue: !Sub ${Appname}-${Environment}-cachemaster-dns
+        CACHE_MASTER_PORT:
+          Fn::ImportValue: !Sub ${Appname}-${Environment}-cachemaster-port
+        CACHE_SLAVE_DNSS:
+          Fn::ImportValue: !Sub ${Appname}-${Environment}-cacheslave-dnss
+        CACHE_SLAVE_PORTS:
+          Fn::ImportValue: !Sub ${Appname}-${Environment}-cacheslave-ports
+
+Resources:
+  # CLOUDWATCH ========================================
+  ErrorMetricGreaterThanZeroAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Lambda Function Error > 0 for deployment
+      ComparisonOperator: GreaterThanThreshold
+      EvaluationPeriods: 2
+      MetricName: Errors
+      Namespace: !Sub AWS/lambda/${Appname}/${Environment}
+      Period: 60
+      Statistic: Sum
+      Threshold: 0
+
+  #API GATEWAY ========================================
+  API:
+    Type: AWS::Serverless::Api
+    Properties:
+      Auth:
+        DefaultAuthorizer: CognitoAuthorizer
+        Authorizers:
+          CognitoAuthorizer:
+            UserPoolArn: "" #INSERT UserPool arn. It is safer to deploy Cognito manually
+        AddDefaultAuthorizerToCorsPreflight: false
+      Cors:
+        AllowMethods: "'*'"
+        AllowHeaders: "'*'"
+        AllowOrigin: "'*'"
+      StageName: !Ref Environment
+      DefinitionBody:
+        swagger: "2.0"
+        info:
+          title:
+            Ref: AWS::StackName
+        paths:
+          /:
+            get:
+              responses: {}
+              x-amazon-apigateway-integration:
+                uri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${outsideTheVpcFunction.Arn}:${ProductionAlias}/invocations
+                httpMethod: "POST"
+                type: "aws_proxy"
+
+
+  #FUNCTIONS ==========================================
+  MigrationVpcFunction:
+    Type: AWS::Serverless::Function
+    Description: Function to execute migration in SwipeMango database
+    Properties:
+      CodeUri: ./src
+      Handler: index.makeMigration
+      Policies:
+        - AWSLambdaVPCAccessExecutionRole
+        - AWSLambdaBasicExecutionRole
+        - SecretsManagerReadWrite
+      VpcConfig:
+        SecurityGroupIds:
+          - Fn::ImportValue: !Sub ${Appname}-${Environment}-lambda-scgroupId
+        SubnetIds:
+          - Fn::ImportValue: !Sub ${Appname}-${Environment}-subnetAId
+          - Fn::ImportValue: !Sub ${Appname}-${Environment}-subnetBId
+
+  outsideTheVpcFunction:
+    Type: AWS::Serverless::Function
+    Description: Proxy Function to execute migration in SwipeMango database
+    Properties:
+      CodeUri: ./src
+      Handler: index.outsideTheVpcFunction
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - LambdaInvokePolicy:
+            FunctionName: !Ref InsideTheVpcFunction
+      Environment:
+        Variables:
+          VPC_FUNCTION_ARN: !Ref InsideTheVpcFunction
+      Events:
+        HTTP:
+          Type: Api
+          Properties:
+            Path: /
+            RestApiId: !Ref API
+            Method: Get
+
+  InsideTheVpcFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ./src
+      Handler: index.InsideTheVpcFunction
+      Policies:
+        - AWSLambdaVPCAccessExecutionRole
+        - AWSLambdaBasicExecutionRole
+      VpcConfig:
+        SecurityGroupIds:
+          - Fn::ImportValue: !Sub ${Appname}-${Environment}-lambda-scgroupId
+        SubnetIds:
+          - Fn::ImportValue: !Sub ${Appname}-${Environment}-subnetAId
+          - Fn::ImportValue: !Sub ${Appname}-${Environment}-subnetBId
+
+
+
+  #LAYERS ================================================
+  LibLayer:
+    Type: AWS::Serverless::LayerVersion
+    Properties:
+      LayerName: LibLayer
+      ContentUri: ./libs
+      CompatibleRuntimes:
+        - nodejs10.x

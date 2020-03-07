@@ -202,7 +202,7 @@ Resources:
       - VPCRouteTableAssociation
       - DefaultVPCPeeringRouteTableAssociation
     Properties:
-      Port: 8080
+      Port: !Ref PeerVPCEC2Port
       Protocol: HTTP
       Targets:
         - Id: !Ref PeerVPCEC2PrivateIP

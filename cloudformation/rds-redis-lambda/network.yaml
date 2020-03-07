@@ -1,0 +1,166 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: "Swipe Mango Network infrastructures"
+
+Parameters:
+  Environment:
+    Type: String
+    AllowedValues:
+      - production
+      - stag
+      - dev
+    ConstraintDescription: invalid environment, only [production, staging, development] are allowed
+  Appname:
+    Type: String
+    Default: swipemango
+
+Resources:
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.1.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: name
+          Value:  !Join ['', [!Ref Appname, !Ref Environment, "-vpc" ]]
+
+  PrivateSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.1.10.0/24
+      AvailabilityZone:
+        Fn::Select:
+          - 0
+          - Fn::GetAZs: ''
+      Tags:
+        - Key: name
+          Value: !Join ['', [!Ref Appname, !Ref Environment, "-subnetA" ]]
+
+  PrivateSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.1.20.0/24
+      AvailabilityZone:
+        Fn::Select:
+          - 1
+          - Fn::GetAZs: ''
+      Tags:
+        - Key: name
+          Value: !Join ['', [!Ref Appname, !Ref Environment, "-subnetB" ]]
+
+
+  SecretManagerVPCEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      PrivateDnsEnabled: true
+      VpcEndpointType: Interface
+      SecurityGroupIds:
+        - !Ref SecretManagerVPCEndpointSecurityGroup
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.secretsmanager
+      VpcId: !Ref VPC
+      SubnetIds:
+        - !Ref PrivateSubnetA
+        - !Ref PrivateSubnetB
+      PolicyDocument: {
+        "Version": "2012-10-17",
+        "Statement": [{
+                        "Effect": "Allow",
+                        "Principal":"*",
+                        "Action": ["secretsmanager:*"],
+                        "Resource": "*"
+                      }]
+      }
+
+  SecretManagerVPCEndpointSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow lambda traffic to SecretManager
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        # Rule to allow traffic in from resources that are attached to the Lambda Security group
+        # This is the specific rule that allows the Lambda to have network access to our RDS db
+        - IpProtocol: -1
+          SourceSecurityGroupId: !GetAtt LambdaSecurityGroup.GroupId
+      SecurityGroupEgress:
+        - IpProtocol: "-1"
+          FromPort: -1
+          ToPort: -1
+          CidrIp: 0.0.0.0/0
+
+
+  # Lambda security group inside the VPC to allow connection to RDS instance
+  LambdaSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow http to client host
+      VpcId: !Ref VPC
+      SecurityGroupEgress:
+        - IpProtocol: '-1'
+          FromPort: -1
+          ToPort: -1
+          CidrIp: 0.0.0.0/0
+
+  DatabaseSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow lambda traffic to RDS
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        # Rule to allow traffic in from resources that are attached to the Lambda Security group
+        # This is the specific rule that allows the Lambda to have network access to our RDS db
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          SourceSecurityGroupId: !GetAtt LambdaSecurityGroup.GroupId
+      SecurityGroupEgress:
+        - IpProtocol: "-1"
+          FromPort: -1
+          ToPort: -1
+          CidrIp: 0.0.0.0/0
+
+  CacheSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow lambda traffic to Elasticache
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        # Rule to allow traffic in from resources that are attached to the Lambda Security group
+        # This is the specific rule that allows the Lambda to have network access to our RDS db
+        - IpProtocol: tcp
+          FromPort: 6379
+          ToPort: 6379
+          SourceSecurityGroupId: !GetAtt LambdaSecurityGroup.GroupId
+      SecurityGroupEgress:
+        - IpProtocol: "-1"
+          FromPort: -1
+          ToPort: -1
+          CidrIp: 0.0.0.0/0
+
+Outputs:
+  DatabaseSecurityGroup:
+    Value: !GetAtt DatabaseSecurityGroup.GroupId
+    Export:
+      Name: !Sub ${Appname}-${Environment}-db-scgroupId
+  CacheSecurityGroup:
+    Value: !GetAtt CacheSecurityGroup.GroupId
+    Export:
+      Name: !Sub ${Appname}-${Environment}-cache-scgroupId
+  LambdaSecurityGroup:
+    Value: !GetAtt LambdaSecurityGroup.GroupId
+    Export:
+      Name: !Sub ${Appname}-${Environment}-lambda-scgroupId
+  VpcId:
+    Value: !Ref VPC
+    Export:
+      Name: !Sub ${Appname}-${Environment}-vpcId
+  SubnetAId:
+    Value: !Ref PrivateSubnetA
+    Export:
+      Name: !Sub ${Appname}-${Environment}-subnetAId
+  SubnetBId:
+    Value: !Ref PrivateSubnetB
+    Export:
+      Name: !Sub ${Appname}-${Environment}-subnetBId
