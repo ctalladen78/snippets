@@ -212,7 +212,7 @@ Resources:
       RouteTableId: !Ref AccepterVPCRouteTableId # Default VPC Route table
       VpcPeeringConnectionId: !Ref VPCPeeringConnection
 
-  VPCRouteTableAssociation:
+  AccepterVPCSubnetTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
       RouteTableId: !Ref AccepterVPCRouteTableId
@@ -243,9 +243,6 @@ Resources:
 
   ElasticLoadBalancer:
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
-    DependsOn:
-      - PublicSubnetA
-      - PublicSubnetB
     Properties:
       IpAddressType: ipv4
       Scheme: internet-facing
@@ -258,11 +255,6 @@ Resources:
 
   TargetGroup:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
-    DependsOn:
-      - VPCPeeringConnection
-      - VPCPeeringRouteTableAssociation
-      - VPCRouteTableAssociation
-      - DefaultVPCPeeringRouteTableAssociation
     Properties:
       Port: "AccepterVPCEC2Port"
       Protocol: HTTP
