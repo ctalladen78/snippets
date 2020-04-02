@@ -43,7 +43,7 @@ Parameters:
     Type: String
     Description: Arn of the certifications from AWS certificate manager
 
-  PeerVPC:
+  AccepterVPC:
     Type: AWS::EC2::VPC::Id
 
   AccepterVPCCidrBlock:
@@ -188,7 +188,7 @@ Resources:
     Type: AWS::EC2::VPCPeeringConnection
     Properties:
       VpcId: !Ref VPC
-      PeerVpcId: !Ref PeerVPC
+      PeerVpcId: "AccepterVPC"
 
   ToAccepterVPCPublicRoute:
     Type: AWS::EC2::Route
