@@ -16,5 +16,9 @@ aws cloudformation update-stack-instances \
     --stack-set-name ${GLOBAL_STACK_NAME} \
     --regions ${REGION} \
     --accounts "${MASTER_ACCOUNT_ID}" "${PROD_ACCOUNT_ID}" "${DEV_ACCOUNT_ID}" \
-    --operation-preferences MaxConcurrentPercentage=50
+    --operation-preferences MaxConcurrentPercentage=50 \
+    --parameter-overrides \
+        MasterAccount=${MASTER_ACCOUNT_ID} \
+        DevAccount=${DEV_ACCOUNT_ID} \
+        ProdAccount=${PROD_ACCOUNT_ID}
 

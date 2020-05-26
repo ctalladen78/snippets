@@ -6,8 +6,16 @@
       "Action": "*",
       "Resource": "*",
       "Condition": {
-        "BoolIfExists": {
+        "StringEquals": {
+          "aws:RequestedRegion": [
+            "ap-southeast-1"
+          ]
+        },
+        "Bool": {
           "aws:MultiFactorAuthPresent": "true"
+        },
+        "Null": {
+          "aws:MultiFactorAuthAge": "false"
         }
       }
     }

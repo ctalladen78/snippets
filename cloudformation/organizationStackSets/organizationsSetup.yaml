@@ -4,13 +4,10 @@ Description: Deploy setup across target accounts
 Parameters:
   MasterAccount:
     Type: String
-    Default: "932241063471"
   DevAccount:
     Type: String
-    Default: "076034880409"
   ProdAccount:
     Type: String
-    Default: "283094985920"
 
 Conditions:
   isMasterAccount: !Equals [!Ref "AWS::AccountId", !Ref MasterAccount]
@@ -79,69 +76,69 @@ Resources:
       PolicyName: DevOpsPolicy
 
   #=========================== Developers ===========================
-#  DevelopersGroup:
-#    Type: AWS::IAM::Group
-#    Condition: isMasterAccount
-#    Properties:
-#      GroupName: Developer
-#
-#  MasterDeveloperPolicy:
-#    Type: AWS::IAM::Policy
-#    Condition: isMasterAccount
-#    Properties:
-#      Groups:
-#        - !Ref DevelopersGroup
-#      PolicyDocument: {
-#        "Version": "2012-10-17",
-#        "Statement": [
-#          {
-#            "Effect": "Allow",
-#            "NotAction": [
-#              "iam:*",
-#              "organizations:*",
-#              "account:*"
-#            ],
-#            "Resource": "*",
-#            "Condition": {
-#              "StringEquals": {
-#                "aws:RequestedRegion": [
-#                  "ap-southeast-1",
-#                  "us-east-1"
-#                ]
-#              }
-#            }
-#          },
-#          {
-#            "Effect": "Allow",
-#            "Action": [
-#              "iam:CreateServiceLinkedRole",
-#              "iam:DeleteServiceLinkedRole",
-#              "iam:ListRoles",
-#              "organizations:DescribeOrganization",
-#              "account:ListRegions"
-#            ],
-#            "Resource": "*",
-#            "Condition": {
-#              "StringEquals": {
-#                "aws:RequestedRegion": [
-#                  "ap-southeast-1",
-#                  "us-east-1"
-#                ]
-#              }
-#            }
-#          }
-#        ]
-#      }
-#      PolicyName: DeveloperPolicy
+  DevelopersGroup:
+    Type: AWS::IAM::Group
+    Condition: isMasterAccount
+    Properties:
+      GroupName: Developer
+
+  MasterDeveloperPolicy:
+    Type: AWS::IAM::Policy
+    Condition: isMasterAccount
+    Properties:
+      Groups:
+        - !Ref DevelopersGroup
+      PolicyDocument: {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "NotAction": [
+              "iam:*",
+              "organizations:*",
+              "account:*"
+            ],
+            "Resource": "*",
+            "Condition": {
+              "StringEquals": {
+                "aws:RequestedRegion": [
+                  "ap-southeast-1",
+                  "us-east-1"
+                ]
+              }
+            }
+          },
+          {
+            "Effect": "Allow",
+            "Action": [
+              "iam:CreateServiceLinkedRole",
+              "iam:DeleteServiceLinkedRole",
+              "iam:ListRoles",
+              "organizations:DescribeOrganization",
+              "account:ListRegions"
+            ],
+            "Resource": "*",
+            "Condition": {
+              "StringEquals": {
+                "aws:RequestedRegion": [
+                  "ap-southeast-1",
+                  "us-east-1"
+                ]
+              }
+            }
+          }
+        ]
+      }
+      PolicyName: DeveloperPolicy
 
   #=========================== Guests ===========================
-#  GuestsGroup:
-#    Type: AWS::IAM::Group
-#    Condition: isMasterAccount
-#    Properties:
-#      GroupName: Guests
-#      ManagedPolicyArns:
-#        - arn:aws:iam::aws:policy/ReadOnlyAccess
+  GuestsGroup:
+    Type: AWS::IAM::Group
+    Condition: isMasterAccount
+    Properties:
+      GroupName: Guests
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/ReadOnlyAccess
 
 
 #=======================================================================
@@ -177,17 +174,17 @@ Resources:
 #=======================================================================
 
   #=========================== DevOps ===========================
-#  ProdDevOpsRole:
-#    Type: AWS::IAM::Role
-#    Condition: isProdAccount
-#    Properties:
-#      AssumeRolePolicyDocument: Json
-#      Description: String
-#      ManagedPolicyArns:
-#        - String
-#      Path: /
-#      Policies:
-#        - Policy
-#      RoleName: DevOpsCrossAccountRole
-#      Tags:
-#        - Tag
+  ProdDevOpsRole:
+    Type: AWS::IAM::Role
+    Condition: isProdAccount
+    Properties:
+      AssumeRolePolicyDocument: Json
+      Description: String
+      ManagedPolicyArns:
+        - String
+      Path: /
+      Policies:
+        - Policy
+      RoleName: DevOpsCrossAccountRole
+      Tags:
+        - Tag

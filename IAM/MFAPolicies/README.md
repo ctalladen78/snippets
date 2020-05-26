@@ -6,4 +6,14 @@ be similar to what you are looking for.
  unable to perform any actions without first enabling MFA**. Your IAM user will then need to access the IAM console
  , locate their username and then activate MFA. Although the IAM user will be able to see all users, they will not be able to make any changes to the other users.
 
-The policies are called `Force_MFA` which you will need to modify as needed for specific permissions for your users (the policy I provided gives the users full access). This is the policy that prevents the users from doing anything in the console until MFA is enabled. The policy MFA allows the IAM user to manage their own MFA devices. Be sure to edit the MFA policy and change <account-ID> to reflect your account ID.
+The policies are called `Force_MFA` which you will need to modify as needed for specific permissions for your users (the policy I provided gives the users full access). 
+This is the policy that prevents the users from doing anything in the console until MFA is enabled. The policy MFA allows the IAM user to manage their own MFA devices. 
+Be sure to edit the MFA policy and change <account-ID> to reflect your account ID.
+
+```json
+{
+        "Bool": { 
+          "aws:MultiFactorAuthPresent": "true"
+        }
+}
+```
