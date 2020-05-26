@@ -1,0 +1,193 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: Deploy setup across target accounts
+
+Parameters:
+  MasterAccount:
+    Type: String
+    Default: "932241063471"
+  DevAccount:
+    Type: String
+    Default: "076034880409"
+  ProdAccount:
+    Type: String
+    Default: "283094985920"
+
+Conditions:
+  isMasterAccount: !Equals [!Ref "AWS::AccountId", !Ref MasterAccount]
+  isDevAccount: !Equals [!Ref "AWS::AccountId", !Ref DevAccount]
+  isProdAccount: !Equals [!Ref "AWS::AccountId", !Ref ProdAccount]
+
+Resources:
+#======================================================================
+#=========================== Master account ===========================
+#======================================================================
+
+  #=========================== DevOps ===========================
+  DevOpsGroup:
+    Type: AWS::IAM::Group
+    Condition: isMasterAccount
+    Properties:
+      GroupName: DevOps
+      Policies:
+        - PolicyName: DevOpsToDevAccountPolicy
+          PolicyDocument: {
+            "Version": "2012-10-17",
+            "Statement": [
+              {
+                "Effect": "Allow",
+                "Action": [
+                  "sts:AssumeRole"
+                ],
+                "Resource": [
+                  { "Fn::Sub": "arn:aws:iam::${DevAccount}:role/DevOpsCrossAccountRole" }
+                ]
+              }
+            ]
+          }
+
+  MasterDevOpsPolicy:
+    Type: AWS::IAM::Policy
+    Condition: isMasterAccount
+    Properties:
+      Groups:
+        - !Ref DevOpsGroup
+      PolicyDocument: {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "NotAction": [
+              "iam:*",
+              "organizations:*",
+              "account:*"
+            ],
+            "Resource": "*"
+          },
+          {
+            "Effect": "Allow",
+            "Action": [
+              "iam:CreateServiceLinkedRole",
+              "iam:DeleteServiceLinkedRole",
+              "iam:ListRoles",
+              "organizations:DescribeOrganization",
+              "account:ListRegions"
+            ],
+            "Resource": "*"
+          }
+        ]
+      }
+      PolicyName: DevOpsPolicy
+
+  #=========================== Developers ===========================
+#  DevelopersGroup:
+#    Type: AWS::IAM::Group
+#    Condition: isMasterAccount
+#    Properties:
+#      GroupName: Developer
+#
+#  MasterDeveloperPolicy:
+#    Type: AWS::IAM::Policy
+#    Condition: isMasterAccount
+#    Properties:
+#      Groups:
+#        - !Ref DevelopersGroup
+#      PolicyDocument: {
+#        "Version": "2012-10-17",
+#        "Statement": [
+#          {
+#            "Effect": "Allow",
+#            "NotAction": [
+#              "iam:*",
+#              "organizations:*",
+#              "account:*"
+#            ],
+#            "Resource": "*",
+#            "Condition": {
+#              "StringEquals": {
+#                "aws:RequestedRegion": [
+#                  "ap-southeast-1",
+#                  "us-east-1"
+#                ]
+#              }
+#            }
+#          },
+#          {
+#            "Effect": "Allow",
+#            "Action": [
+#              "iam:CreateServiceLinkedRole",
+#              "iam:DeleteServiceLinkedRole",
+#              "iam:ListRoles",
+#              "organizations:DescribeOrganization",
+#              "account:ListRegions"
+#            ],
+#            "Resource": "*",
+#            "Condition": {
+#              "StringEquals": {
+#                "aws:RequestedRegion": [
+#                  "ap-southeast-1",
+#                  "us-east-1"
+#                ]
+#              }
+#            }
+#          }
+#        ]
+#      }
+#      PolicyName: DeveloperPolicy
+
+  #=========================== Guests ===========================
+#  GuestsGroup:
+#    Type: AWS::IAM::Group
+#    Condition: isMasterAccount
+#    Properties:
+#      GroupName: Guests
+#      ManagedPolicyArns:
+#        - arn:aws:iam::aws:policy/ReadOnlyAccess
+
+
+#=======================================================================
+#=========================== Dev account ===============================
+#=======================================================================
+
+  #=========================== DevOps ===========================
+  DevDevOpsRole:
+    Type: AWS::IAM::Role
+    Condition: isDevAccount
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Principal:
+              AWS:
+                - !Ref MasterAccount
+            Action:
+              - "sts:AssumeRole"
+      Description: Federated access for DevOps to development account
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/PowerUserAccess
+      RoleName: DevOpsCrossAccountRole
+      Tags:
+        - Key: app
+          Value: waves8-organization
+        - Key: type
+          Value: security
+
+#=======================================================================
+#=========================== Prod account ===============================
+#=======================================================================
+
+  #=========================== DevOps ===========================
+#  ProdDevOpsRole:
+#    Type: AWS::IAM::Role
+#    Condition: isProdAccount
+#    Properties:
+#      AssumeRolePolicyDocument: Json
+#      Description: String
+#      ManagedPolicyArns:
+#        - String
+#      Path: /
+#      Policies:
+#        - Policy
+#      RoleName: DevOpsCrossAccountRole
+#      Tags:
+#        - Tag

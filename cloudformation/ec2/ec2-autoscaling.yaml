@@ -1,0 +1,238 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "EC2 instance with docker installed"
+Parameters:
+  KeyName:
+    Description: Name of an existing EC2 KeyPair to enable SSH access to the instance
+    Type: AWS::EC2::KeyPair::KeyName
+    ConstraintDescription: must be the name of an existing EC2 KeyPair.
+  SSHLocation:
+    Description: The IP address range that can be used to SSH to the EC2 instances
+    Type: String
+    MinLength: "9"
+    MaxLength: "18"
+    Default: 0.0.0.0/0
+    AllowedPattern: "(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})/(\\d{1,2})"
+    ConstraintDescription: must be a valid IP CIDR range of the form x.x.x.x/x.
+  Environment:
+    Type: String
+    AllowedValues:
+      - production
+      - dev
+    ConstraintDescription: Environment is not valid
+  Appname:
+    Type: String
+  DbSecretManagerArn:
+    Type: String
+  ApiKeysSecretArn:
+    Type: String
+  CodeDeployBucketArn:
+    Type: String
+
+Mappings:
+  Variables:
+    production:
+      ASGMinSize: 1
+      AGSMaxSize: 4
+      InstanceType: t3.medium
+    dev:
+      ASGMinSize: 1
+      AGSMaxSize: 2
+      InstanceType: t2.micro
+
+Conditions:
+  isProduction: !Equals [!Ref Environment, production]
+
+Resources:
+  AutoscalingGroup:
+    UpdatePolicy:
+      AutoScalingRollingUpdate:
+        MaxBatchSize: !If [isProduction, 4, 1]
+        MinInstancesInService: 1
+        WaitOnResourceSignals: false
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      AvailabilityZones:
+        - !Select [0, !GetAZs ""]
+        - !Select [1, !GetAZs ""]
+      LaunchConfigurationName: !Ref LaunchConfig
+      MaxSize: !FindInMap [Variables, !Ref Environment, AGSMaxSize]
+      MinSize: !FindInMap [Variables, !Ref Environment, ASGMinSize]
+      NotificationConfiguration:
+        TopicARN:
+          Ref: ASGNotification
+        NotificationTypes:
+          - autoscaling:EC2_INSTANCE_LAUNCH
+          - autoscaling:EC2_INSTANCE_LAUNCH_ERROR
+          - autoscaling:EC2_INSTANCE_TERMINATE
+          - autoscaling:EC2_INSTANCE_TERMINATE_ERROR
+      TargetGroupARNs:
+        - Fn::ImportValue: !Sub ${Appname}-${Environment}-targetGroup-id
+      VPCZoneIdentifier:
+        - Fn::ImportValue: !Sub ${Appname}-${Environment}-public-subnetAId
+        - Fn::ImportValue: !Sub ${Appname}-${Environment}-public-subnetBId
+      Tags:
+        - Key: app
+          Value: waves-backend
+          PropagateAtLaunch: true
+        - Key: type
+          Value: compute
+          PropagateAtLaunch: true
+        - Key: env
+          Value: !Ref Environment
+          PropagateAtLaunch: true
+
+  ScaleUpPolicy:
+    Type: AWS::AutoScaling::ScalingPolicy
+    DeletionPolicy: Delete
+    Properties:
+      AdjustmentType: ChangeInCapacity
+      AutoScalingGroupName:
+        Ref: AutoscalingGroup
+      Cooldown: "60"
+      ScalingAdjustment: "1"
+
+  ScaleDownPolicy:
+    Type: AWS::AutoScaling::ScalingPolicy
+    Properties:
+      AdjustmentType: ChangeInCapacity
+      AutoScalingGroupName:
+        Ref: AutoscalingGroup
+      Cooldown: "60"
+      ScalingAdjustment: "-1"
+
+  CPUAlarmHigh:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Scale-up if CPU > 80% for 1 minute
+      MetricName: CPUUtilization
+      Namespace: AWS/EC2
+      Statistic: Average
+      Period: "60"
+      EvaluationPeriods: "2"
+      Threshold: "80"
+      AlarmActions:
+        - Ref: ScaleUpPolicy
+      Dimensions:
+        - Name: AutoScalingGroupName
+          Value:
+            Ref: AutoscalingGroup
+      ComparisonOperator: GreaterThanThreshold
+
+  CPUAlarmLow:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Scale-down if CPU < 60% for 1 minute
+      MetricName: CPUUtilization
+      Namespace: AWS/EC2
+      Statistic: Average
+      Period: "60"
+      EvaluationPeriods: "2"
+      Threshold: "60"
+      AlarmActions:
+        - Ref: ScaleDownPolicy
+      Dimensions:
+        - Name: AutoScalingGroupName
+          Value:
+            Ref: AutoscalingGroup
+      ComparisonOperator: LessThanThreshold
+
+  LaunchConfig:
+    Type: AWS::AutoScaling::LaunchConfiguration
+    Properties:
+      IamInstanceProfile: !Ref IAMInstanceProfile
+      ImageId: ami-048a01c78f7bae4aa
+      InstanceType: !FindInMap [Variables, !Ref Environment, InstanceType]
+      KeyName: !Ref KeyName
+      SecurityGroups:
+        - Fn::ImportValue: !Sub ${Appname}-${Environment}-ec2-scgroupId
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          yum update -y &&
+          amazon-linux-extras install docker
+          service docker start
+          usermod -a -G docker ec2-user
+          chkconfig docker on
+          sudo curl -L https://github.com/docker/compose/releases/download/1.22.0/docker-compose-$(uname -s)-$(uname -m) -o /usr/local/bin/docker-compose
+          sudo chmod +x /usr/local/bin/docker-compose
+          sudo yum install ruby -y
+          sudo yum install wget
+          wget https://aws-codedeploy-us-east-1.s3.amazonaws.com/latest/install
+          chmod +x ./install
+          sudo ./install auto
+
+  IAMInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName: !Sub ${Appname}-${Environment}-instanceprofile
+      Path: "/"
+      Roles:
+        - !Ref WavesBackendEc2Role
+
+  WavesBackendEc2Role:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ec2.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Path: "/"
+
+  # Divide between prod and dev environment
+  WavesBackendEc2Policy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: !Sub ${Appname}-${Environment}-ec2-policy
+      Roles:
+        - Ref: WavesBackendEc2Role
+      PolicyDocument:
+        Statement:
+          - Sid: SecretManager
+            Effect: Allow
+            Action: secretsmanager:GetSecretValue
+            Resource:
+              - !Ref DbSecretManagerArn
+              - !Ref ApiKeysSecretArn
+
+          - Sid: S3Read
+            Effect: Allow
+            Action:
+              - s3:Get*
+              - s3:List*
+            Resource:
+              - !Ref CodeDeployBucketArn
+              - !Sub ${CodeDeployBucketArn}/*
+              - !Sub arn:aws:s3:${AWS::Region}:${AWS::AccountId}:accesspoint/*
+
+          - Sid: S3Secrets
+            Effect: Allow
+            Action:
+              - s3:GetObject
+            Resource:
+              - !Sub arn:aws:s3:::${Appname}-secrets-${Environment}/*
+
+          - Sid: Cloudwatch
+            Effect: Allow
+            Action:
+              - logs:PutLogEvents
+              - logs:CreateLogStream
+              - logs:CreateLogGroup
+            Resource: "*"
+
+          - Sid: SES
+            Effect: Allow
+            Action:
+              - ses:SendEmail
+              - ses:SendTemplatedEmail
+            Resource: arn:aws:ses:*:*:identity/*
+
+  ASGNotification:
+    Type: AWS::SNS::Topic
+    Properties:
+      Subscription:
+        - Endpoint: your@email.com
+          Protocol: email
