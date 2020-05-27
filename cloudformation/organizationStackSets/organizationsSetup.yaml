@@ -15,6 +15,9 @@ Parameters:
     Type: Number
     Default: 14
     AllowedValues: [1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, 400, 545, 731, 1827, 3653]
+  Regions:
+    Type: List<String>
+    Description: List of regions where you want your policy to be scoped
 
 Conditions:
   isMasterAccount: !Equals [!Ref "AWS::AccountId", !Ref MasterAccount]
@@ -47,6 +50,7 @@ Resources:
     Type: AWS::IAM::Policy
     Condition: isMasterAccount
     Properties:
+      PolicyName: DevOpsPolicy
       Groups:
         - !Ref DevOpsGroup
       PolicyDocument:
@@ -67,73 +71,88 @@ Resources:
               - account:ListRegions
             Resource: "*"
 
-      PolicyName: DevOpsPolicy
-
   #=========================== Developers ===========================
-  #  DevelopersGroup:
-  #    Type: AWS::IAM::Group
-  #    Condition: isMasterAccount
-  #    Properties:
-  #      GroupName: Developer
-  #
-  #  MasterDeveloperPolicy:
-  #    Type: AWS::IAM::Policy
-  #    Condition: isMasterAccount
-  #    Properties:
-  #      Groups:
-  #        - !Ref DevelopersGroup
-  #      PolicyDocument: {
-  #        "Version": "2012-10-17",
-  #        "Statement": [
-  #          {
-  #            "Effect": "Allow",
-  #            "NotAction": [
-  #              "iam:*",
-  #              "organizations:*",
-  #              "account:*"
-  #            ],
-  #            "Resource": "*",
-  #            "Condition": {
-  #              "StringEquals": {
-  #                "aws:RequestedRegion": [
-  #                  "ap-southeast-1",
-  #                  "us-east-1"
-  #                ]
-  #              }
-  #            }
-  #          },
-  #          {
-  #            "Effect": "Allow",
-  #            "Action": [
-  #              "iam:CreateServiceLinkedRole",
-  #              "iam:DeleteServiceLinkedRole",
-  #              "iam:ListRoles",
-  #              "organizations:DescribeOrganization",
-  #              "account:ListRegions"
-  #            ],
-  #            "Resource": "*",
-  #            "Condition": {
-  #              "StringEquals": {
-  #                "aws:RequestedRegion": [
-  #                  "ap-southeast-1",
-  #                  "us-east-1"
-  #                ]
-  #              }
-  #            }
-  #          }
-  #        ]
-  #      }
-  #      PolicyName: DeveloperPolicy
+  DevelopersGroup:
+    Type: AWS::IAM::Group
+    Condition: isMasterAccount
+    Properties:
+      GroupName: Developer
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/ReadOnlyAccess
 
   #=========================== Guests ===========================
-  #  GuestsGroup:
-  #    Type: AWS::IAM::Group
-  #    Condition: isMasterAccount
-  #    Properties:
-  #      GroupName: Guests
-  #      ManagedPolicyArns:
-  #        - arn:aws:iam::aws:policy/ReadOnlyAccess
+  GuestsGroup:
+    Type: AWS::IAM::Group
+    Condition: isMasterAccount
+    Properties:
+      GroupName: Guests
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/ReadOnlyAccess
 
+  #=========================== All ===============================
+  AllowMFAPolicy:
+    Type: AWS::IAM::Policy
+    Condition: isMasterAccount
+    Properties:
+      PolicyName: AllowMFAPolicy
+      Groups:
+        - !Ref DevelopersGroup
+        - !Ref DevOpsGroup
+        - !Ref GuestsGroup
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowUsersToCreateDeleteTheirOwnVirtualMFADevices
+            Effect: Allow
+            Action:
+              - iam:*VirtualMFADevice
+            Resource:
+              - arn:aws:iam::<account-ID>:mfa/${aws:username}
+          - Sid: AllowUsersToEnableSyncDisableTheirOwnMFADevices
+            Effect: Allow
+            Action:
+              - iam:EnableMFADevice
+              - iam:ListMFADevices
+              - iam:ResyncMFADevice
+            Resource:
+              - arn:aws:iam::<account-ID>:user/${aws:username}
+          - Sid: AllowUsersToListVirtualMFADevices
+            Effect: Allow
+            Action:
+              - iam:ListVirtualMFADevices
+            Resource:
+              - arn:aws:iam::<account-ID>:mfa/*
+          - Sid: AllowUsersToListUsersInConsole
+            Effect: Allow
+            Action:
+              - iam:ListUsers
+            Resource:
+              - arn:aws:iam::<account-ID>:user/*
+          - Sid: AllowUsersAllActionsForCredentials
+            Effect: Allow
+            Action:
+              - iam:*LoginProfile
+              - iam:*AccessKey*
+              - iam:*SigningCertificate*
+            Resource:
+              - arn:aws:iam::<account-ID>:user/${aws:username}
+          - Effect: Allow
+            Action:
+              - iam:ChangePassword
+            Resource:
+              - arn:aws:iam::<account-ID>:user/${aws:username}
+          - Effect: Allow
+            Action:
+              - iam:GetAccountPasswordPolicy
+            Resource:
+              - "*"
+          - Sid: AllowUsersToSeeStatsOnIAMConsoleDashboard
+            Effect: Allow
+            Action:
+              - iam:GetAccount*
+              - iam:ListAccount*
+            Resource:
+              - "*"
 
   #=======================================================================
   #=========================== Dev account ===============================
@@ -159,7 +178,7 @@ Resources:
       RoleName: DevOpsCrossAccountRole
       Tags:
         - Key: app
-          Value: waves8-organization
+          Value: organization
         - Key: type
           Value: security
         - Key: environment
@@ -209,7 +228,7 @@ Resources:
       S3BucketName: !Ref TrailBucket
       Tags:
         - Key: app
-          Value: waves8-organization
+          Value: organization
         - Key: type
           Value: security
         - Key: environment
@@ -253,29 +272,67 @@ Resources:
                 's3:x-amz-acl': 'bucket-owner-full-control'
 
   #=========================== DevOps ===========================
-  #  ProdDevOpsRole:
-  #    Type: AWS::IAM::Role
-  #    Condition: isProdAccount
-  #    Properties:
-  #      AssumeRolePolicyDocument: Json
-  #      Description: String
-  #      ManagedPolicyArns:
-  #        - String
-  #      Path: /
-  #      Policies:
-  #        - Policy
-  #      RoleName: DevOpsCrossAccountRole
-  #      Tags:
-  #        - Tag
+  ProdDevOpsRole:
+    Type: AWS::IAM::Role
+    Condition: isDevAccount
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Principal:
+              AWS:
+                - !Ref MasterAccount
+            Action:
+              - "sts:AssumeRole"
+      Description: Federated access for DevOps to production account
+      Policies:
+        - Ref ProdDevOpsPolicy
+      RoleName: DevOpsCrossAccountRole
+      Tags:
+        - Key: app
+          Value: organization
+        - Key: type
+          Value: security
+        - Key: environment
+          Value: dev
 
-
+  ProdDevOpsPolicy:
+    Type: AWS::IAM::Policy
+    Condition: isMasterAccount
+    Properties:
+      PolicyName: DeveloperPolicy
+      Groups:
+        - !Ref DevelopersGroup
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            NotAction:
+              - iam:*
+              - organizations:*
+              - account:*
+            Resource: "*"
+            Condition:
+              StringEquals:
+                aws:RequestedRegion: !Ref Regions
+          - Effect: Allow
+            Action:
+              - iam:CreateServiceLinkedRole
+              - iam:DeleteServiceLinkedRole
+              - iam:ListRoles
+              - organizations:DescribeOrganization
+              - account:ListRegions
+            Resource: "*"
+            Condition:
+              StringEquals:
+                aws:RequestedRegion: !Ref Regions
 
 
 
   #===============================================================================================================================================================
 
   #=============================== CloudTrail security events Prod Account ===========================================================
-
 
   NetworkAclChangesMetricFilter:
     Type: AWS::Logs::MetricFilter
